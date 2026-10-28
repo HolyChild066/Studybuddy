@@ -1,56 +1,144 @@
-# Welcome to your Expo app 👋
+# StudyMate
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+**A Mobile Application for Academic Peer Matching and Collaborative Learning**
 
-## Get started
+React Native (Expo) · TypeScript · Expo Router · Supabase-ready
 
-1. Install dependencies
+---
 
-   ```bash
-   npm install
-   ```
+## Status (Oct 28, 2026)
 
-2. Start the app
+The full product flow is built and running:
 
-   ```bash
-   npx expo start
-   ```
+- Onboarding, sign up, sign in, student verification
+- Academic profile: course, year, bio, study preference, subjects, weekly availability
+- Weighted matching deck with reciprocal skill exchange
+- Mutual match (backend rule: both sides must choose **Study**)
+- Guided chat — **no free-text input anywhere**
+- Study sessions: online or **University Library only**, with a safety acknowledgement gate
+- Block and report, with reports storing a message snapshot
+- All state persists across reloads
 
-In the output, you'll find options to open the app in a
+**The data layer is currently local** (`src/lib/store.tsx` → AsyncStorage) because no Supabase credentials were provided yet. The model, rules, and action API mirror the intended Postgres schema, so swapping in Supabase is contained to that one module plus new `supabase/` SQL.
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+---
 
-You can start developing by editing the files inside the **src/app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
+## Run it
 
 ```bash
-npm run reset-project
+cd C:\Users\kinle\StudyBuddy
+npm install
+npx expo start
 ```
 
-This command will move the starter code to the **example** directory and create a blank **src/app** directory where you can start developing.
+- Press `w` for web, or scan the QR with Expo Go on a phone.
+- Web is currently running at <http://localhost:8081>.
 
-### Other setup steps
+### Demo accounts
 
-- To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)
-- If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
-- Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
+Sign in with any password. The email decides which seeded student you are:
 
-## Learn more
+| Email | Student | Why |
+| --- | --- | --- |
+| `alex@northbridge.edu` | Alex Morgan | Main demo account |
+| `jamie@northbridge.edu` | Jamie Cruz | Reciprocal match with Alex |
+| `maria@northbridge.edu` | Maria Santos | One-way help match |
+| `sam@northbridge.edu` | Sam Rivera | Weaker availability overlap |
 
-To learn more about developing your project with Expo, look at the following resources:
+> **Profile → Switch demo user** lets you act as the other side of a match on one device. This is the fastest way to demo the mutual-match rule and accepting a session invite.
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+### 5-minute demo script
 
-## Join the community
+1. Launch → onboarding → **Log in** as Alex.
+2. **Buddy** tab → Jamie Cruz, **90% match**, skill exchange: Alex teaches Programming 1, Jamie teaches Database Systems.
+3. Tap **Study** → match screen (both sides already chose Study).
+4. **Say hi** → guided chat. Only prompt chips, no keyboard.
+5. **All messages → Study session → Let's schedule a study session.**
+6. Pick **Database Systems**, a date, **In-person** → **Read safety notice** → **I understand** → **Send session invite**.
+7. **Profile → Switch demo user → Jamie Cruz** → open the chat → **Accept session**.
+8. Point out: status becomes **Confirmed**, a confirmation message is sent, and the session now appears on Home.
+9. Back on Jamie's chat → **⋮ → Block user**. Alex disappears from Jamie's chats, deck, and sessions — and Alex can no longer see Jamie either.
+10. **Profile → Reset demo data** to restore a clean state.
 
-Join our community of developers creating universal apps.
+---
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+## Matching engine
+
+`src/lib/matching.ts` — max 100 points:
+
+| Signal | Max |
+| --- | --- |
+| Subject compatibility | 50 |
+| Availability overlap | 15 |
+| Study preference | 15 |
+| Same course | 10 |
+| Year level | 10 |
+
+Subject score:
+- **50** — reciprocal: each can help with something the other needs
+- **30** — one-way help
+- **15** — shared "want to study" only
+- **0** — excluded (deck minimum is 30)
+
+Blocked users are removed from the deck, chats, and sessions. Decisions are per-viewer and never exposed to the person who was passed on.
+
+---
+
+## Safety model
+
+- **No free-text chat.** The composer is chips only; sessions are cards. In the Supabase schema this becomes a `messages` table with `template_id` + `payload jsonb` and **no `body` column**.
+- **Library-only in-person.** The mode picker offers Library or Online; the location is not user-editable.
+- **Safety acknowledgement.** In-person invites cannot be sent until the notice is acknowledged; the flag is stored with the session.
+- **Blocking is mutual.** A block hides the pair from decks, conversations, and session lists on both sides.
+- **Reports snapshot the message.** The report stores the rendered text and category at report time, so moderation does not need live access to the conversation.
+- **Guided prompt catalog** — 38 prompts across 9 stages, stored in `src/lib/templates.ts` and designed to move to a read-only `message_templates` table.
+
+---
+
+## Code map
+
+```
+src/
+  app/
+    index.tsx                 auth-aware redirect
+    welcome.tsx               onboarding
+    sign-in.tsx  sign-up.tsx  verification.tsx
+    edit-profile.tsx          subjects, availability, study preference
+    (app)/                    tab shell
+      home.tsx  buddy.tsx  chats.tsx  profile.tsx
+    buddy-profile/[id].tsx    full academic profile + score breakdown
+    chat/[id].tsx             guided chat, session cards, block/report
+    match/[id].tsx            mutual-match celebration
+    session/new.tsx           invite builder + safety gate
+    session/[id].tsx          session detail / accept / complete
+  components/
+    ui/                       design system primitives
+    tab-bar.tsx               custom floating tab bar
+    report-sheet.tsx  safety-notice.tsx  confirm-dialog.tsx
+  lib/
+    types.ts  store.tsx  matching.ts  subjects.ts  templates.ts
+  theme/tokens.ts             colors, type, spacing, radius
+```
+
+Design tokens follow the Figma file: Inter, `#3B4FE0` primary, `#FF5A4F` accent, `#F7F8FC` canvas, 20px cards, pill buttons.
+
+---
+
+## Next: Supabase
+
+Needed to move from the local demo to the real backend:
+
+1. A Supabase project URL and **anon** key (`EXPO_PUBLIC_SUPABASE_URL`, `EXPO_PUBLIC_SUPABASE_ANON_KEY`). The service-role key must never ship in the app.
+2. Run the schema + RLS migration (tables: `profiles`, `subjects`, `profile_subjects`, `availability`, `decisions`, `matches`, `message_templates`, `messages`, `study_sessions`, `blocks`, `reports`, `verifications`).
+3. Replace the local store methods with Supabase queries/RPCs. UI components do not change.
+
+Deliberately excluded: AI features, video/voice, group study, payments, gamification, nationwide universities, live location, cloud file storage, free-text chat.
+
+---
+
+## Known limitations of the current build
+
+- Data is per-device (AsyncStorage), not shared between phones.
+- Verification auto-approves in demo mode; production uses a moderator-reviewed status.
+- No email/password validation beyond basic form checks; Supabase Auth will own this.
+- No push notifications or realtime sync yet.
