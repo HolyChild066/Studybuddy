@@ -389,6 +389,42 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
           return next;
         });
+
+        // Load messages and sessions for matches
+        const matchIds = (matchesRes.data || []).map((m: any) => m.id);
+        if (matchIds.length > 0) {
+          const [messagesRes, sessionsRes] = await Promise.all([
+            sb.from('messages').select('*').in('match_id', matchIds).order('created_at', { ascending: true }),
+            sb.from('study_sessions').select('*').in('match_id', matchIds).order('created_at', { ascending: true }),
+          ]);
+
+          if (!mounted) return;
+
+          setState((s) => ({
+            ...s,
+            messages: (messagesRes.data || []).map((msg: any) => ({
+              id: msg.id,
+              matchId: msg.match_id,
+              senderId: msg.sender_id,
+              templateKey: msg.template_key,
+              payload: msg.payload || {},
+              at: new Date(msg.created_at).getTime(),
+            })),
+            sessions: (sessionsRes.data || []).map((ses: any) => ({
+              id: ses.id,
+              matchId: ses.match_id,
+              subjectId: ses.subject_id,
+              createdBy: ses.created_by,
+              date: ses.session_date,
+              start: ses.start_time?.slice(0, 5),
+              end: ses.end_time?.slice(0, 5),
+              mode: ses.mode,
+              location: ses.location,
+              status: ses.status,
+              safetyAcknowledged: ses.safety_acknowledged,
+            })),
+          }));
+        }
       } catch (e) {
         console.warn('Supabase load failed', e);
       }
@@ -564,22 +600,66 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const updateProfile = useCallback(
     (patch: Partial<Profile>) => {
       patchCurrent((st) => ({ ...st, profile: { ...st.profile, ...patch } }));
+      if (isSupabaseConfigured && supabase && state.currentUserId) {
+        const sb = supabase;
+        const updates: any = {};
+        if (patch.name !== undefined) updates.name = patch.name;
+        if (patch.course !== undefined) updates.course = patch.course;
+        if (patch.year !== undefined) updates.year = patch.year;
+        if (patch.bio !== undefined) updates.bio = patch.bio;
+        if (patch.studyPref !== undefined) updates.study_pref = patch.studyPref;
+        if (patch.avatarColor !== undefined) updates.avatar_color = patch.avatarColor;
+        void sb.from('profiles').update(updates).eq('id', state.currentUserId);
+      }
     },
-    [patchCurrent],
+    [patchCurrent, state.currentUserId],
   );
 
   const saveSubjects = useCallback(
     (entries: SubjectEntry[]) => {
       patchCurrent((st) => ({ ...st, subjects: entries }));
+      if (isSupabaseConfigured && supabase && state.currentUserId) {
+        const sb = supabase;
+        const uid = state.currentUserId;
+        void (async () => {
+          await sb.from('profile_subjects').delete().eq('profile_id', uid);
+          if (entries.length > 0) {
+            await sb.from('profile_subjects').insert(
+              entries.map((e) => ({
+                profile_id: uid,
+                subject_id: e.subjectId,
+                kind: e.kind,
+              })),
+            );
+          }
+        })();
+      }
     },
-    [patchCurrent],
+    [patchCurrent, state.currentUserId],
   );
 
   const saveAvailability = useCallback(
     (blocks: Availability[]) => {
       patchCurrent((st) => ({ ...st, availability: blocks }));
+      if (isSupabaseConfigured && supabase && state.currentUserId) {
+        const sb = supabase;
+        const uid = state.currentUserId;
+        void (async () => {
+          await sb.from('availability').delete().eq('profile_id', uid);
+          if (blocks.length > 0) {
+            await sb.from('availability').insert(
+              blocks.map((b) => ({
+                profile_id: uid,
+                day: b.day,
+                start_time: b.start,
+                end_time: b.end,
+              })),
+            );
+          }
+        })();
+      }
     },
-    [patchCurrent],
+    [patchCurrent, state.currentUserId],
   );
 
   const decide = useCallback(
@@ -612,6 +692,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         return { ...s, decisions, matches };
       });
 
+      if (isSupabaseConfigured && supabase) {
+        void supabase
+          .from('decisions')
+          .upsert({ viewer_id: me, target_id: targetId, action }, { onConflict: 'viewer_id,target_id' });
+      }
+
       return created;
     },
     [state.currentUserId, state.decisions, state.matches],
@@ -641,8 +727,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         };
         return { ...s, messages: [...s.messages, message] };
       });
+      if (isSupabaseConfigured && supabase && state.currentUserId) {
+        void supabase.from('messages').insert({
+          match_id: matchId,
+          sender_id: state.currentUserId,
+          template_key: templateKey,
+          payload,
+        });
+      }
     },
-    [],
+    [state.currentUserId],
   );
 
   const createSession = useCallback((input: CreateSessionInput): string => {
@@ -664,14 +758,32 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       };
       return { ...s, sessions: [...s.sessions, session] };
     });
+    if (isSupabaseConfigured && supabase && state.currentUserId) {
+      void supabase.from('study_sessions').insert({
+        id,
+        match_id: input.matchId,
+        subject_id: input.subjectId,
+        created_by: state.currentUserId,
+        session_date: input.date,
+        start_time: input.start,
+        end_time: input.end,
+        mode: input.mode,
+        location: input.mode === 'online' ? 'Online' : 'University Library',
+        status: 'proposed',
+        safety_acknowledged: input.safetyAcknowledged,
+      });
+    }
     return id;
-  }, []);
+  }, [state.currentUserId]);
 
   const setSessionStatus = useCallback((sessionId: string, status: SessionStatus) => {
     setState((s) => ({
       ...s,
       sessions: s.sessions.map((x) => (x.id === sessionId ? { ...x, status } : x)),
     }));
+    if (isSupabaseConfigured && supabase) {
+      void supabase.from('study_sessions').update({ status }).eq('id', sessionId);
+    }
   }, []);
 
   const blockUser = useCallback((targetId: string) => {
@@ -689,13 +801,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         ],
       };
     });
-  }, []);
+    if (isSupabaseConfigured && supabase && state.currentUserId) {
+      void supabase
+        .from('blocks')
+        .upsert({ blocker_id: state.currentUserId, blocked_id: targetId }, { onConflict: 'blocker_id,blocked_id' });
+    }
+  }, [state.currentUserId]);
 
   const reportUser = useCallback((input: ReportInput) => {
+    const id = uid('report');
     setState((s) => {
       if (!s.currentUserId) return s;
       const report: Report = {
-        id: uid('report'),
+        id,
         reporterId: s.currentUserId,
         reportedId: input.reportedId,
         messageId: input.messageId,
@@ -708,7 +826,20 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       };
       return { ...s, reports: [...s.reports, report] };
     });
-  }, []);
+    if (isSupabaseConfigured && supabase && state.currentUserId) {
+      void supabase.from('reports').insert({
+        id,
+        reporter_id: state.currentUserId,
+        reported_id: input.reportedId,
+        message_id: input.messageId || null,
+        message_text: input.messageText || null,
+        message_category: input.messageCategory || null,
+        reason: input.reason,
+        note: input.note || null,
+        status: 'open',
+      });
+    }
+  }, [state.currentUserId]);
 
   const resetDemo = useCallback(() => {
     AsyncStorage.removeItem(STORAGE_KEY).catch(() => {});
