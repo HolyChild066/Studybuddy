@@ -516,6 +516,120 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     };
   }, [state.signedIn, state.currentUserId]);
 
+  // Realtime subscriptions: messages, sessions, matches push live between accounts
+  useEffect(() => {
+    if (!isSupabaseConfigured || !supabase) return;
+    if (!state.signedIn || !state.currentUserId) return;
+
+    const sb = supabase!;
+    const uid = state.currentUserId;
+    let mounted = true;
+    const channels: ReturnType<typeof sb.channel>[] = [];
+
+    // Messages: new messages in any of the user's matches (RLS already restricts to participants)
+    const messagesChannel = sb.channel('messages-realtime')
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'messages',
+      }, (payload: any) => {
+        if (!mounted) return;
+        const msg = payload.new as any;
+        setState((s) => {
+          if (s.messages.some((m) => m.id === msg.id)) return s;
+          return {
+            ...s,
+            messages: [...s.messages, {
+              id: msg.id,
+              matchId: msg.match_id,
+              senderId: msg.sender_id,
+              templateKey: msg.template_key,
+              payload: msg.payload || {},
+              at: new Date(msg.created_at).getTime(),
+            }].sort((a, b) => a.at - b.at),
+          };
+        });
+      })
+      .subscribe();
+    channels.push(messagesChannel);
+
+    // Study sessions: new sessions + status updates (accept/decline/complete)
+    const sessionsChannel = sb.channel('sessions-realtime')
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'study_sessions',
+      }, (payload: any) => {
+        if (!mounted) return;
+        const ses = payload.new as any;
+        setState((s) => {
+          if (s.sessions.some((s2) => s2.id === ses.id)) return s;
+          return {
+            ...s,
+            sessions: [...s.sessions, {
+              id: ses.id,
+              matchId: ses.match_id,
+              subjectId: ses.subject_id,
+              createdBy: ses.created_by,
+              date: ses.session_date,
+              start: ses.start_time?.slice(0, 5),
+              end: ses.end_time?.slice(0, 5),
+              mode: ses.mode,
+              location: ses.location,
+              status: ses.status,
+              safetyAcknowledged: ses.safety_acknowledged,
+            }],
+          };
+        });
+      })
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'study_sessions',
+      }, (payload: any) => {
+        if (!mounted) return;
+        const ses = payload.new as any;
+        setState((s) => ({
+          ...s,
+          sessions: s.sessions.map((s2) =>
+            s2.id === ses.id ? { ...s2, status: ses.status } : s2
+          ),
+        }));
+      })
+      .subscribe();
+    channels.push(sessionsChannel);
+
+    // Matches: new mutual matches created (trigger fires on both sides)
+    const matchesChannel = sb.channel('matches-realtime')
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'matches',
+      }, (payload: any) => {
+        if (!mounted) return;
+        const m = payload.new as any;
+        setState((s) => {
+          if (s.matches.some((mm) => mm.id === m.id)) return s;
+          return {
+            ...s,
+            matches: [...s.matches, {
+              id: m.id,
+              a: m.user_a,
+              b: m.user_b,
+              at: new Date(m.created_at).getTime(),
+            }],
+          };
+        });
+      })
+      .subscribe();
+    channels.push(matchesChannel);
+
+    return () => {
+      mounted = false;
+      channels.forEach((ch) => sb.removeChannel(ch));
+    };
+  }, [state.signedIn, state.currentUserId]);
+
   useEffect(() => {
     if (!state.hydrated) return;
     const { hydrated: _hydrated, ...persisted } = state;
