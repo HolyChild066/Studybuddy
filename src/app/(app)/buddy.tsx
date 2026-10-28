@@ -1,7 +1,7 @@
 import { router } from 'expo-router';
 import { Handshake, Sparkles, X } from 'lucide-react-native';
 import { useState } from 'react';
-import { Pressable, View } from 'react-native';
+import { ActivityIndicator, Pressable, View } from 'react-native';
 
 import { AppText, Avatar, Button, Card, Chip, EmptyState, Pill, Screen } from '@/components/ui';
 import { useApp } from '@/lib/store';
@@ -17,7 +17,15 @@ export default function BuddyScreen() {
   const { currentStudent, deck, decide } = useApp();
   const [banner, setBanner] = useState<string | null>(null);
 
-  if (!currentStudent) return null;
+  if (!currentStudent) {
+    return (
+      <Screen>
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+          <ActivityIndicator color={colors.primary} />
+        </View>
+      </Screen>
+    );
+  }
 
   const top = deck[0];
 

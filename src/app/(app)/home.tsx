@@ -8,7 +8,7 @@ import {
   Users,
   Video,
 } from 'lucide-react-native';
-import { Pressable, View } from 'react-native';
+import { ActivityIndicator, Pressable, View } from 'react-native';
 
 import {
   AppText,
@@ -26,7 +26,15 @@ import { colors, radius, space } from '@/theme/tokens';
 
 export default function HomeScreen() {
   const { currentStudent, myMatches, partnerOf, state } = useApp();
-  if (!currentStudent) return null;
+  if (!currentStudent) {
+    return (
+      <Screen>
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+          <ActivityIndicator color={colors.primary} />
+        </View>
+      </Screen>
+    );
+  }
 
   const partner = myMatches[0] ? partnerOf(myMatches[0]) : undefined;
   const sessions = state.sessions

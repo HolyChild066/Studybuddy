@@ -40,9 +40,7 @@ export default function RootLayout() {
             contentStyle: { backgroundColor: colors.bg },
             animation: 'slide_from_right',
           }}
-        >
-          <Stack.Screen name="(app)" options={{ headerShown: false }} />
-        </Stack>
+        />
       </AppProvider>
     </SafeAreaProvider>
   );

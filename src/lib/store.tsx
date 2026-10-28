@@ -241,10 +241,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     let alive = true;
     (async () => {
       try {
+        if (isSupabaseConfigured) {
+          // Clear old demo state that may have cached signedIn/currentUserId
+          await AsyncStorage.removeItem(STORAGE_KEY);
+        }
         const raw = await AsyncStorage.getItem(STORAGE_KEY);
         if (raw && alive) {
           const parsed = JSON.parse(raw) as Partial<AppState>;
-          setState({ ...initialState(), ...parsed, hydrated: true });
+          if (isSupabaseConfigured) {
+            setState({ ...initialState(), ...parsed, signedIn: false, currentUserId: null, hydrated: true });
+          } else {
+            setState({ ...initialState(), ...parsed, hydrated: true });
+          }
           return;
         }
       } catch {
@@ -425,6 +433,50 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             })),
           }));
         }
+
+        // Load all approved public profiles for the deck
+        const { data: publicProfiles } = await sb.from('public_profiles').select('*');
+        if (publicProfiles && publicProfiles.length > 0 && mounted) {
+          // Load subjects and availability for each public profile
+          const otherIds = publicProfiles.map((p: any) => p.id).filter((id: string) => id !== uid);
+          const [otherSubjects, otherAvailability] = await Promise.all([
+            sb.from('profile_subjects').select('*').in('profile_id', otherIds),
+            sb.from('availability').select('*').in('profile_id', otherIds),
+          ]);
+
+          setState((s) => {
+            const students = { ...s.students };
+            for (const p of publicProfiles) {
+              if (p.id === uid) continue;
+              const subs = (otherSubjects.data || []).filter((ps: any) => ps.profile_id === p.id).map((ps: any) => ({
+                subjectId: ps.subject_id,
+                kind: ps.kind,
+              }));
+              const avail = (otherAvailability.data || []).filter((a: any) => a.profile_id === p.id).map((a: any) => ({
+                day: a.day,
+                start: a.start_time?.slice(0, 5),
+                end: a.end_time?.slice(0, 5),
+              }));
+              students[p.id] = {
+                profile: {
+                  id: p.id,
+                  name: p.name,
+                  email: '',
+                  course: p.course,
+                  year: p.year,
+                  bio: p.bio || '',
+                  studyPref: p.study_pref,
+                  avatarColor: p.avatar_color || '#3B4FE0',
+                  university: p.university || 'Northbridge University',
+                  verification: 'approved',
+                },
+                subjects: subs,
+                availability: avail,
+              };
+            }
+            return { ...s, students };
+          });
+        }
       } catch (e) {
         console.warn('Supabase load failed', e);
       }
@@ -450,21 +502,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       void (async () => {
         try {
           const sb = supabase!;
-          await sb.auth.signInWithPassword({ email: email.trim(), password: password ?? '' });
+          const { error } = await sb.auth.signInWithPassword({ email: email.trim(), password: password ?? '' });
+          if (error) {
+            console.warn('Supabase sign-in failed:', error.message);
+          }
         } catch (e) {
-          console.warn('Supabase sign-in failed, falling back to local demo', e);
-          setState((s) => {
-            const normalized = email.trim().toLowerCase();
-            const found =
-              Object.values(s.students).find(
-                (st) => st.profile.email.toLowerCase() === normalized,
-              ) ?? s.students['u_alex'];
-            return {
-              ...s,
-              signedIn: true,
-              currentUserId: found?.profile.id ?? 'u_alex',
-            };
-          });
+          console.warn('Supabase sign-in failed:', e);
         }
       })();
       return;
@@ -489,7 +532,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       void (async () => {
         try {
           const sb = supabase!;
-          await sb.auth.signUp({
+          const { error } = await sb.auth.signUp({
             email: input.email.trim(),
             password: password ?? '',
             options: {
@@ -500,8 +543,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
               },
             },
           });
+          if (error) {
+            console.warn('Supabase sign-up failed:', error.message);
+          }
         } catch (e) {
-          console.warn('Supabase sign-up failed, falling back to local demo', e);
+          console.warn('Supabase sign-up failed:', e);
           setState((s) => {
             const id = uid('u');
             const profile: Profile = {
