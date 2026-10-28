@@ -12,7 +12,7 @@ export default function SignIn() {
   const [password, setPassword] = useState('demo1234');
 
   const submit = () => {
-    signIn(email);
+    signIn(email, password);
     router.replace('/home');
   };
 

@@ -18,7 +18,7 @@ export default function SignUp() {
   const canSubmit = name.trim().length > 1 && email.includes('@') && password.length >= 8;
 
   const submit = () => {
-    signUp({ name, email, course, year });
+    signUp({ name, email, course, year }, password);
     router.replace('/verification');
   };
 

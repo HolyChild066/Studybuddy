@@ -8,9 +8,11 @@ import React, {
   useState,
 } from 'react';
 
-import { buildDeck, isBlocked, scoreCandidate } from './matching';
+import { isBlocked, scoreCandidate } from './matching';
 import type { CandidateScore } from './matching';
+import { buildDeck as buildDeckLocal } from './matching';
 import { UNIVERSITY } from './subjects';
+import { isSupabaseConfigured, supabase } from './supabase';
 import type {
   Availability,
   Block,
@@ -203,8 +205,8 @@ interface AppContextValue {
   currentStudent: Student | null;
   deck: CandidateScore[];
   myMatches: Match[];
-  signIn: (email: string) => void;
-  signUp: (input: SignUpInput) => void;
+  signIn: (email: string, password?: string) => void;
+  signUp: (input: SignUpInput, password?: string) => void;
   signOut: () => void;
   switchUser: (id: string) => void;
   completeVerification: () => void;
@@ -261,7 +263,30 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     ? (state.students[state.currentUserId] ?? null)
     : null;
 
-  const signIn = useCallback((email: string) => {
+  const signIn = useCallback((email: string, password?: string) => {
+    if (isSupabaseConfigured && supabase) {
+      void (async () => {
+        try {
+          await supabase.auth.signInWithPassword({ email: email.trim(), password: password ?? '' });
+        } catch (e) {
+          console.warn('Supabase sign-in failed, falling back to local demo', e);
+          setState((s) => {
+            const normalized = email.trim().toLowerCase();
+            const found =
+              Object.values(s.students).find(
+                (st) => st.profile.email.toLowerCase() === normalized,
+              ) ?? s.students['u_alex'];
+            return {
+              ...s,
+              signedIn: true,
+              currentUserId: found?.profile.id ?? 'u_alex',
+            };
+          });
+        }
+      })();
+      return;
+    }
+
     setState((s) => {
       const normalized = email.trim().toLowerCase();
       const found =
@@ -276,7 +301,52 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
-  const signUp = useCallback((input: SignUpInput) => {
+  const signUp = useCallback((input: SignUpInput, password?: string) => {
+    if (isSupabaseConfigured && supabase) {
+      void (async () => {
+        try {
+          await supabase.auth.signUp({
+            email: input.email.trim(),
+            password: password ?? '',
+            options: {
+              data: {
+                name: input.name.trim() || 'New Student',
+                course: input.course,
+                year: input.year,
+              },
+            },
+          });
+        } catch (e) {
+          console.warn('Supabase sign-up failed, falling back to local demo', e);
+          setState((s) => {
+            const id = uid('u');
+            const profile: Profile = {
+              id,
+              name: input.name.trim() || 'New Student',
+              email: input.email.trim().toLowerCase(),
+              course: input.course,
+              year: input.year,
+              bio: '',
+              studyPref: 'either',
+              avatarColor:
+                AVATAR_COLORS[Object.keys(s.students).length % AVATAR_COLORS.length] ??
+                '#3B4FE0',
+              university: UNIVERSITY,
+              verification: 'none',
+            };
+            const student: Student = { profile, subjects: [], availability: [] };
+            return {
+              ...s,
+              students: { ...s.students, [id]: student },
+              signedIn: true,
+              currentUserId: id,
+            };
+          });
+        }
+      })();
+      return;
+    }
+
     setState((s) => {
       const id = uid('u');
       const profile: Profile = {
@@ -304,6 +374,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const signOut = useCallback(() => {
+    if (isSupabaseConfigured && supabase) {
+      void supabase.auth.signOut();
+    }
     setState((s) => ({ ...s, signedIn: false, currentUserId: null }));
   }, []);
 
@@ -520,7 +593,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const deck = useMemo(() => {
     if (!currentStudent) return [];
-    return buildDeck(
+    return buildDeckLocal(
       currentStudent,
       Object.values(state.students),
       state.decisions,
