@@ -332,25 +332,54 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
         if (!mounted) return;
 
+        const { data: sessionData } = await sb.auth.getSession();
+        const session = sessionData.session;
+
         setState((s) => {
           const next = { ...s };
           const students = { ...s.students };
 
-          // Profile
-          if (profileRes.data) {
-            const p = profileRes.data;
+          // Profile — create from auth session if it doesn't exist yet
+          let profile: any = profileRes.data;
+          if (!profile && session?.user) {
+            const u = session.user;
+            profile = {
+              id: u.id,
+              name: (u.user_metadata?.name as string) || u.email?.split('@')[0] || 'Student',
+              email: u.email || '',
+              course: (u.user_metadata?.course as string) || 'BS Information Technology',
+              year: (u.user_metadata?.year as number) || 1,
+              bio: '',
+              studyPref: 'either',
+              avatarColor: randomAvatar(),
+              university: 'Northbridge University',
+              verification: 'none',
+            };
+            // Insert the profile so it persists
+            void sb.from('profiles').insert({
+              id: profile.id,
+              name: profile.name,
+              email: profile.email,
+              course: profile.course,
+              year: profile.year,
+              study_pref: profile.studyPref,
+              avatar_color: profile.avatarColor,
+            });
+          }
+
+          if (profile) {
             students[uid] = {
               profile: {
-                id: p.id,
-                name: p.name,
-                email: p.email,
-                course: p.course,
-                year: p.year,
-                bio: p.bio || '',
-                studyPref: p.study_pref,
-                avatarColor: p.avatar_color || '#3B4FE0',
-                university: p.university || 'Northbridge University',
-                verification: p.verification,
+                id: profile.id,
+                name: profile.name,
+                email: profile.email,
+                course: profile.course,
+                year: profile.year,
+                bio: profile.bio || '',
+                studyPref: profile.study_pref || profile.studyPref,
+                avatarColor: profile.avatar_color || profile.avatarColor,
+                university: profile.university || 'Northbridge University',
+                verification: profile.verification,
               },
               subjects: (subjectsRes.data || []).map((ps: any) => ({
                 subjectId: ps.subject_id,
@@ -497,33 +526,34 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     ? (state.students[state.currentUserId] ?? null)
     : null;
 
-  const signIn = useCallback((email: string, password?: string) => {
+  const signIn = useCallback((email: string, password?: string): Promise<void> => {
     if (isSupabaseConfigured && supabase) {
-      void (async () => {
+      return (async () => {
         try {
           const sb = supabase!;
           const { error } = await sb.auth.signInWithPassword({ email: email.trim(), password: password ?? '' });
           if (error) {
-            console.warn('Supabase sign-in failed:', error.message);
+            throw new Error(error.message);
           }
         } catch (e) {
-          console.warn('Supabase sign-in failed:', e);
+          throw e instanceof Error ? e : new Error(String(e));
         }
       })();
-      return;
     }
 
-    setState((s) => {
-      const normalized = email.trim().toLowerCase();
-      const found =
-        Object.values(s.students).find(
-          (st) => st.profile.email.toLowerCase() === normalized,
-        ) ?? s.students['u_alex'];
-      return {
-        ...s,
-        signedIn: true,
-        currentUserId: found?.profile.id ?? 'u_alex',
-      };
+    return Promise.resolve().then(() => {
+      setState((s) => {
+        const normalized = email.trim().toLowerCase();
+        const found =
+          Object.values(s.students).find(
+            (st) => st.profile.email.toLowerCase() === normalized,
+          ) ?? s.students['u_alex'];
+        return {
+          ...s,
+          signedIn: true,
+          currentUserId: found?.profile.id ?? 'u_alex',
+        };
+      });
     });
   }, []);
 

@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { KeyboardAvoidingView, Platform, Pressable, View } from 'react-native';
+import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, View } from 'react-native';
 
 import { AppText, Button, Card, Input, Screen } from '@/components/ui';
 import { useApp } from '@/lib/store';
@@ -10,10 +10,21 @@ export default function SignIn() {
   const { signIn } = useApp();
   const [email, setEmail] = useState('alex@northbridge.edu');
   const [password, setPassword] = useState('demo1234');
+  const [loggingIn, setLoggingIn] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const submit = () => {
-    signIn(email, password);
-    router.replace('/home');
+  const submit = async () => {
+    setError(null);
+    setLoggingIn(true);
+    try {
+      // signIn returns a promise that resolves once Supabase session is established
+      await signIn(email, password);
+      router.replace('/home');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Sign in failed. Try again.');
+    } finally {
+      setLoggingIn(false);
+    }
   };
 
   return (
@@ -28,11 +39,20 @@ export default function SignIn() {
           </AppText>
         </View>
 
+        {error ? (
+          <Card tone="flat">
+            <AppText variant="small" color={colors.text}>
+              {error}
+            </AppText>
+          </Card>
+        ) : null}
+
         <Card tone="tint">
           <AppText variant="h3">Demo account</AppText>
           <AppText variant="small" color={colors.muted}>
-            Use <AppText variant="small" color={colors.primary}>alex@northbridge.edu</AppText> and
-            any password. Jamie and Maria are already verified and waiting in your deck.
+            Use <AppText variant="small" color={colors.primary}>alex@northbridge.edu</AppText> and{' '}
+            <AppText variant="small" color={colors.primary}>demo1234</AppText>. Jamie and Maria are
+            already verified and waiting in your deck.
           </AppText>
         </Card>
 
@@ -54,7 +74,8 @@ export default function SignIn() {
           />
         </View>
 
-        <Button label="Log in" onPress={submit} />
+        <Button label="Log in" onPress={submit} disabled={loggingIn} />
+        {loggingIn ? <ActivityIndicator color={colors.primary} style={{ marginTop: space.sm }} /> : null}
 
         <View style={{ alignItems: 'center' }}>
           <Pressable onPress={() => router.push('/sign-up')}>
