@@ -36,6 +36,10 @@ const STORAGE_KEY = 'studymate.state.v1';
 
 const AVATAR_COLORS = ['#3B4FE0', '#FF5A4F', '#12B76A', '#8B5CF6', '#0EA5E9', '#F59E0B'];
 
+function randomAvatar(): string {
+  return AVATAR_COLORS[Math.floor(Math.random() * AVATAR_COLORS.length)] ?? '#3B4FE0';
+}
+
 interface AppState {
   hydrated: boolean;
   signedIn: boolean;
@@ -254,6 +258,148 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
+    if (!isSupabaseConfigured || !supabase) return;
+    let mounted = true;
+
+    const syncAuth = async () => {
+      const sb = supabase!;
+      const { data } = await sb.auth.getSession();
+      if (!mounted) return;
+      if (data.session?.user) {
+        setState((s) => ({
+          ...s,
+          signedIn: true,
+          currentUserId: data.session!.user.id,
+        }));
+      }
+    };
+
+    void syncAuth();
+
+    const sb = supabase!;
+    const { data: sub } = sb.auth.onAuthStateChange((_event, session) => {
+      if (!mounted) return;
+      if (session?.user) {
+        setState((s) => ({
+          ...s,
+          signedIn: true,
+          currentUserId: session.user.id,
+        }));
+      } else {
+        setState((s) => ({
+          ...s,
+          signedIn: false,
+          currentUserId: null,
+        }));
+      }
+    });
+
+    return () => {
+      mounted = false;
+      sub.subscription.unsubscribe();
+    };
+  }, []);
+
+  // Load data from Supabase when authenticated
+  useEffect(() => {
+    if (!isSupabaseConfigured || !supabase) return;
+    if (!state.signedIn || !state.currentUserId) return;
+
+    let mounted = true;
+
+    (async () => {
+      try {
+        const sb = supabase!;
+        const uid = state.currentUserId!;
+
+        const [profileRes, subjectsRes, availabilityRes, blocksRes, decisionsRes, matchesRes, reportsRes] = await Promise.all([
+          sb.from('profiles').select('*').eq('id', uid).maybeSingle(),
+          sb.from('profile_subjects').select('*').eq('profile_id', uid),
+          sb.from('availability').select('*').eq('profile_id', uid),
+          sb.from('blocks').select('*').or(`blocker_id.eq.${uid},blocked_id.eq.${uid}`),
+          sb.from('decisions').select('*').eq('viewer_id', uid),
+          sb.from('matches').select('*').or(`user_a.eq.${uid},user_b.eq.${uid}`),
+          sb.from('reports').select('*').eq('reporter_id', uid),
+        ]);
+
+        if (!mounted) return;
+
+        setState((s) => {
+          const next = { ...s };
+          const students = { ...s.students };
+
+          // Profile
+          if (profileRes.data) {
+            const p = profileRes.data;
+            students[uid] = {
+              profile: {
+                id: p.id,
+                name: p.name,
+                email: p.email,
+                course: p.course,
+                year: p.year,
+                bio: p.bio || '',
+                studyPref: p.study_pref,
+                avatarColor: p.avatar_color || '#3B4FE0',
+                university: p.university || 'Northbridge University',
+                verification: p.verification,
+              },
+              subjects: (subjectsRes.data || []).map((ps: any) => ({
+                subjectId: ps.subject_id,
+                kind: ps.kind,
+              })),
+              availability: (availabilityRes.data || []).map((a: any) => ({
+                day: a.day,
+                start: a.start_time?.slice(0, 5),
+                end: a.end_time?.slice(0, 5),
+              })),
+            };
+          }
+
+          next.students = students;
+          next.blocks = (blocksRes.data || []).map((b: any) => ({
+            blockerId: b.blocker_id,
+            blockedId: b.blocked_id,
+            at: new Date(b.created_at).getTime(),
+          }));
+          next.decisions = (decisionsRes.data || []).map((d: any) => ({
+            viewerId: d.viewer_id,
+            targetId: d.target_id,
+            action: d.action,
+            at: new Date(d.created_at).getTime(),
+          }));
+          next.matches = (matchesRes.data || []).map((m: any) => ({
+            id: m.id,
+            a: m.user_a,
+            b: m.user_b,
+            at: new Date(m.created_at).getTime(),
+          }));
+          next.reports = (reportsRes.data || []).map((r: any) => ({
+            id: r.id,
+            reporterId: r.reporter_id,
+            reportedId: r.reported_id,
+            messageId: r.message_id || undefined,
+            messageText: r.message_text || undefined,
+            messageCategory: r.message_category || undefined,
+            reason: r.reason,
+            note: r.note || undefined,
+            status: r.status,
+            at: new Date(r.created_at).getTime(),
+          }));
+
+          return next;
+        });
+      } catch (e) {
+        console.warn('Supabase load failed', e);
+      }
+    })();
+
+    return () => {
+      mounted = false;
+    };
+  }, [state.signedIn, state.currentUserId]);
+
+  useEffect(() => {
     if (!state.hydrated) return;
     const { hydrated: _hydrated, ...persisted } = state;
     AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(persisted)).catch(() => {});
@@ -267,7 +413,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (isSupabaseConfigured && supabase) {
       void (async () => {
         try {
-          await supabase.auth.signInWithPassword({ email: email.trim(), password: password ?? '' });
+          const sb = supabase!;
+          await sb.auth.signInWithPassword({ email: email.trim(), password: password ?? '' });
         } catch (e) {
           console.warn('Supabase sign-in failed, falling back to local demo', e);
           setState((s) => {
@@ -305,7 +452,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (isSupabaseConfigured && supabase) {
       void (async () => {
         try {
-          await supabase.auth.signUp({
+          const sb = supabase!;
+          await sb.auth.signUp({
             email: input.email.trim(),
             password: password ?? '',
             options: {
