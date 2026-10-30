@@ -19,16 +19,22 @@ import type {
   ChatMessage,
   Decision,
   DecisionAction,
+  FeedbackConcern,
+  FeedbackTag,
+  LearningProgress,
   Match,
   MessagePayload,
+  PeerFeedback,
   Profile,
   Report,
   ReportReason,
+  Rating,
   SessionMode,
   SessionStatus,
   Student,
   StudySession,
   SubjectEntry,
+  TopicStatus,
   VerificationStatus,
 } from './types';
 
@@ -51,6 +57,8 @@ interface AppState {
   sessions: StudySession[];
   blocks: Block[];
   reports: Report[];
+  peerFeedback: PeerFeedback[];
+  learningProgress: Record<string, LearningProgress>;
 }
 
 function uid(prefix: string): string {
@@ -175,6 +183,8 @@ function initialState(): AppState {
     sessions: [],
     blocks: [],
     reports: [],
+    peerFeedback: [],
+    learningProgress: {},
   };
 }
 
@@ -204,6 +214,24 @@ interface ReportInput {
   note?: string;
 }
 
+export interface PeerFeedbackInput {
+  sessionId: string;
+  matchId: string;
+  reviewedId: string;
+  rating: Rating;
+  tags: FeedbackTag[];
+  note?: string;
+  concern?: FeedbackConcern;
+  concernNote?: string;
+}
+
+export interface LearningProgressInput {
+  subjectId: string;
+  topics: { name: string; status: TopicStatus }[];
+  confidenceBefore?: number;
+  confidenceAfter?: number;
+}
+
 interface AppContextValue {
   state: AppState;
   currentStudent: Student | null;
@@ -219,6 +247,8 @@ interface AppContextValue {
   saveSubjects: (entries: SubjectEntry[]) => void;
   saveAvailability: (blocks: Availability[]) => void;
   decide: (targetId: string, action: DecisionAction) => string | null;
+  submitPeerFeedback: (input: PeerFeedbackInput) => void;
+  submitLearningProgress: (input: LearningProgressInput) => void;
   scoreFor: (targetId: string) => CandidateScore | null;
   sendMessage: (matchId: string, templateKey: string, payload?: MessagePayload) => void;
   createSession: (input: CreateSessionInput) => string;
@@ -773,12 +803,145 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     [],
   );
 
+  const submitPeerFeedback = useCallback((input: PeerFeedbackInput) => {
+    const id = uid('peer_feedback');
+    const now = Date.now();
+    const feedback: PeerFeedback = {
+      id,
+      sessionId: input.sessionId,
+      matchId: input.matchId,
+      reviewerId: state.currentUserId || '',
+      reviewedId: input.reviewedId,
+      rating: input.rating,
+      tags: input.tags,
+      note: input.note,
+      concern: input.concern,
+      concernNote: input.concernNote,
+      at: now,
+    };
+    setState((s) => ({
+      ...s,
+      peerFeedback: [...s.peerFeedback, feedback],
+    }));
+    if (isSupabaseConfigured && supabase) {
+      void supabase.from('peer_feedback').upsert({
+        id,
+        session_id: input.sessionId,
+        match_id: input.matchId,
+        reviewer_id: state.currentUserId,
+        reviewed_id: input.reviewedId,
+        rating: input.rating,
+        tags: input.tags,
+        note: input.note || null,
+        concern: input.concern || null,
+        concern_note: input.concernNote || null,
+      }, { onConflict: 'session_id,reviewer_id' });
+    }
+  }, [state.currentUserId]);
+
+  const submitLearningProgress = useCallback((input: LearningProgressInput) => {
+    const profileId = state.currentUserId;
+    if (!profileId) return;
+
+    const now = Date.now();
+    const existing = state.learningProgress[profileId];
+    const topicList = input.topics.map((t) => ({ name: t.name, status: t.status as TopicStatus }));
+
+    const payload: LearningProgress = {
+      id: existing?.id || uid('learning_progress'),
+      profileId,
+      subjectId: input.subjectId,
+      topics: topicList,
+      confidenceBefore: input.confidenceBefore,
+      confidenceAfter: input.confidenceAfter,
+      sessionsCompleted: existing?.sessionsCompleted ?? 0,
+      updatedAt: now,
+    };
+
+    setState((s) => ({
+      ...s,
+      learningProgress: {
+        ...s.learningProgress,
+        [profileId]: payload,
+      },
+    }));
+
+    if (isSupabaseConfigured && supabase) {
+      void supabase.from('learning_progress').upsert({
+        id: payload.id,
+        profile_id: profileId,
+        subject_id: input.subjectId,
+        topics: topicList,
+        confidence_before: input.confidenceBefore,
+        confidence_after: input.confidenceAfter,
+        sessions_completed: payload.sessionsCompleted,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'profile_id,subject_id' });
+    }
+  }, [state.currentUserId]);
+
   const completeVerification = useCallback(() => {
     patchCurrent((st) => ({
       ...st,
       profile: { ...st.profile, verification: 'approved' },
     }));
-  }, [patchCurrent]);
+
+    // Initialize learning progress for the verified user
+    if (state.currentUserId) {
+      const profile = state.students[state.currentUserId]?.profile;
+      if (!profile) return;
+
+      const subjects = profile.course.includes('IT')
+        ? ['IT 101', 'IT 102', 'IT 103', 'IT 203', 'IT 204', 'IT 205']
+        : profile.course.includes('CS')
+          ? ['IT 101', 'IT 102', 'IT 103', 'IT 203', 'IT 204', 'IT 205', 'MATH 101']
+          : ['IT 101', 'IT 102'];
+
+      const newProgress: LearningProgress = {
+        id: uid('learning_progress'),
+        profileId: state.currentUserId,
+        subjectId: 'it101',
+        topics: subjects.map((subjectName) => ({ name: subjectName, status: 'learning' as const })),
+        confidenceBefore: 3,
+        confidenceAfter: undefined,
+        sessionsCompleted: 0,
+        updatedAt: Date.now(),
+      };
+
+      setState((s) => ({
+        ...s,
+        learningProgress: {
+          ...s.learningProgress,
+          [state.currentUserId as string]: newProgress,
+        },
+      }));
+    }
+
+    if (isSupabaseConfigured && supabase && state.currentUserId) {
+      const sb = supabase;
+      const profile = state.students[state.currentUserId]?.profile;
+      if (profile) {
+        const subjects = profile.course.includes('IT')
+          ? ['IT 101', 'IT 102', 'IT 103', 'IT 203', 'IT 204', 'IT 205']
+          : profile.course.includes('CS')
+            ? ['IT 101', 'IT 102', 'IT 103', 'IT 203', 'IT 204', 'IT 205', 'MATH 101']
+            : ['IT 101', 'IT 102'];
+
+        const lpId = uid('learning_progress');
+        const topics = subjects.map((subjectName) => ({ name: subjectName, status: 'learning' }));
+        void sb.from('learning_progress').upsert({
+          id: lpId,
+          profile_id: state.currentUserId,
+          subject_id: 'it101',
+          topics,
+          confidence_before: 3,
+          confidence_after: null,
+          sessions_completed: 0,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'profile_id,subject_id' });
+      }
+    }
+  }, [patchCurrent, state.currentUserId]);
 
   const setVerification = useCallback(
     (status: VerificationStatus) => {
@@ -1107,6 +1270,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     partnerOf,
     isBlockedWith,
     resetDemo,
+    submitPeerFeedback,
+    submitLearningProgress,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

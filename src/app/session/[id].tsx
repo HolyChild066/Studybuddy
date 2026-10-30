@@ -1,19 +1,25 @@
-import { router, useLocalSearchParams } from 'expo-router';
-import { CalendarDays, Check, MapPin, ShieldCheck, Video, X } from 'lucide-react-native';
+import { useState, useEffect } from 'react';
 import { View } from 'react-native';
+import { CalendarDays, Video, MapPin, ShieldCheck, Check, X } from 'lucide-react-native';
+import { router } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
 
+import { FeedbackSheet } from '@/components/feedback-sheet';
 import { AppText, Avatar, Button, Card, Header, Pill, Screen } from '@/components/ui';
 import { useApp } from '@/lib/store';
 import { formatDate, subjectLabel, to12h } from '@/lib/subjects';
+import { Rating, FeedbackTag, FeedbackConcern, MessagePayload } from '@/lib/types';
 import { colors, space } from '@/theme/tokens';
 
 export default function SessionScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { state, currentStudent, matchFor, partnerOf, setSessionStatus } = useApp();
+  const { state, currentStudent, matchFor, partnerOf, setSessionStatus, sendMessage, submitPeerFeedback } = useApp();
 
   const session = state.sessions.find((s) => s.id === id);
   const match = session ? matchFor(session.matchId) : undefined;
   const partner = match ? partnerOf(match) : undefined;
+
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
 
   if (!session || !match || !partner || !currentStudent) {
     return (
@@ -29,6 +35,45 @@ export default function SessionScreen() {
   const mine = session.createdBy === currentStudent.profile.id;
   const canRespond = session.status === 'proposed' && !mine;
   const canComplete = session.status === 'confirmed';
+
+  const handleComplete = () => {
+    setSessionStatus(session.id, 'completed');
+    setFeedbackOpen(true);
+  };
+
+  const handleFeedbackSubmit = (data: {
+    rating: Rating;
+    tags: FeedbackTag[];
+    note?: string;
+    concern?: FeedbackConcern;
+  }) => {
+    // Send feedback message to chat
+    sendMessage(match.id, 'peer_feedback', {
+      sessionId: session.id,
+      rating: data.rating,
+      tags: data.tags,
+      note: data.note,
+      concern: data.concern,
+    } as MessagePayload);
+    // Persist peer feedback to store + Supabase peer_feedback table
+    submitPeerFeedback({
+      sessionId: session.id,
+      matchId: match.id,
+      reviewedId: partner.profile.id,
+      rating: data.rating,
+      tags: data.tags,
+      note: data.note,
+      concern: data.concern,
+    });
+    setFeedbackOpen(false);
+  };
+
+  useEffect(() => {
+    // Auto-open feedback when session is marked completed from another source
+    if (session.status === 'completed' && !feedbackOpen) {
+      setFeedbackOpen(true);
+    }
+  }, [session.status, feedbackOpen]);
 
   return (
     <Screen scroll>
@@ -117,7 +162,7 @@ export default function SessionScreen() {
           <View style={{ gap: space.sm }}>
             <Button
               label="Mark as completed"
-              onPress={() => setSessionStatus(session.id, 'completed')}
+              onPress={handleComplete}
             />
             <Button
               label="Cancel session"
@@ -135,6 +180,17 @@ export default function SessionScreen() {
       </View>
 
       <View style={{ height: 40 }} />
+
+      {/* Feedback Sheet auto-triggers on session completion */}
+      {feedbackOpen && (
+        <FeedbackSheet
+          visible={feedbackOpen}
+          partnerName={partner.profile.name}
+          subjectName={subjectLabel(session.subjectId)}
+          onClose={() => setFeedbackOpen(false)}
+          onSubmit={handleFeedbackSubmit}
+        />
+      )}
     </Screen>
   );
 }

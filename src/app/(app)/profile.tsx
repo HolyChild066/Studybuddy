@@ -7,6 +7,7 @@ import {
   LogOut,
   Pencil,
   RefreshCcw,
+  TrendingUp,
   Users,
 } from 'lucide-react-native';
 import { useState } from 'react';
@@ -43,6 +44,7 @@ export default function ProfileScreen() {
   if (!currentStudent) return null;
   const profile = currentStudent.profile;
   const completed = state.sessions.filter((s) => s.status === 'completed').length;
+  const progress = state.learningProgress[profile.id];
 
   const others = Object.values(state.students).filter(
     (s) => s.profile.id !== profile.id && s.profile.verification === 'approved',
@@ -102,6 +104,33 @@ export default function ProfileScreen() {
           <MiniStat icon={<CalendarDays size={16} color={colors.success} />} value={String(completed)} label="Sessions" />
           <MiniStat icon={<BookOpen size={16} color={colors.accent} />} value={String(currentStudent.subjects.length)} label="Subjects" />
         </View>
+
+        <Card>
+          <SectionHeader title="Learning progress" />
+          {progress ? (
+            <View style={{ gap: space.sm }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                <AppText variant="small">Confidence level</AppText>
+                <AppText variant="small" style={{ fontWeight: '600' }}>
+                  {progress.confidenceAfter ?? progress.confidenceBefore ?? 3}/5
+                </AppText>
+              </View>
+              {progress.topics.map((t) => (
+                  <AppText
+                    key={t.name}
+                    variant="small"
+                    style={{ marginRight: space.sm, color: t.status === 'done' ? colors.success : t.status === 'learning' ? colors.warning : colors.muted }}
+                  >
+                    {t.name}
+                  </AppText>
+                ))}
+            </View>
+          ) : (
+            <AppText variant="caption" color={colors.muted}>
+              No progress tracked yet.
+            </AppText>
+          )}
+        </Card>
 
         <Card>
           <SectionHeader

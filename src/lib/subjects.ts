@@ -48,6 +48,12 @@ export function subjectLabel(id: string): string {
   return subjectById(id)?.name ?? id;
 }
 
+// Learning progress helper to get topics by subject
+export function topicsForSubject(subjectId: string): string[] {
+  const s = subjectById(subjectId);
+  return s ? [s.name] : [];
+}
+
 export function subjectCode(id: string): string {
   return subjectById(id)?.code ?? '';
 }

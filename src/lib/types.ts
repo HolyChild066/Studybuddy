@@ -137,3 +137,57 @@ export interface Report {
 }
 
 export type ConversationStage = 'new' | 'subject' | 'scheduled';
+
+// ---------------------------------------------------------------------------
+// Peer feedback (§12)
+// ---------------------------------------------------------------------------
+
+export type Rating = 1 | 2 | 3 | 4 | 5;
+
+export type FeedbackTag =
+  | 'focused'
+  | 'on_time'
+  | 'helpful'
+  | 'great_explainer';
+
+export type FeedbackConcern =
+  | 'safety_concern'
+  | 'off_topic'
+  | 'unhelpful'
+  | 'other';
+
+export interface PeerFeedback {
+  id: string;
+  sessionId: string;
+  matchId: string;
+  reviewerId: string;
+  reviewedId: string;
+  rating: Rating;
+  tags: FeedbackTag[];
+  note?: string;
+  concern?: FeedbackConcern;
+  concernNote?: string;
+  at: number;
+}
+
+// ---------------------------------------------------------------------------
+// Learning progress (§13)
+// ---------------------------------------------------------------------------
+
+export type TopicStatus = 'done' | 'learning' | 'remaining';
+
+export interface Topic {
+  name: string;
+  status: TopicStatus;
+}
+
+export interface LearningProgress {
+  id: string;
+  profileId: string;
+  subjectId: string;
+  topics: Topic[];
+  confidenceBefore?: number;
+  confidenceAfter?: number;
+  sessionsCompleted: number;
+  updatedAt: number;
+}
