@@ -1,4 +1,4 @@
-import { Home, MessageCircle, User, Users } from 'lucide-react-native';
+import { Brain, Home, MessageCircle, User, Users } from 'lucide-react-native';
 import { Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -7,6 +7,7 @@ import { colors, font, radius, shadow, space } from '@/theme/tokens';
 const TABS = [
   { name: 'home', label: 'Home', Icon: Home },
   { name: 'buddy', label: 'Buddy', Icon: Users },
+  { name: 'tutor', label: 'Tutor', Icon: Brain },
   { name: 'chats', label: 'Chat', Icon: MessageCircle },
   { name: 'profile', label: 'Profile', Icon: User },
 ] as const;

@@ -12,6 +12,7 @@ export default function AppLayout() {
       tabBar={(props) => <TabBar {...props} />}>
       <Tabs.Screen name="home" />
       <Tabs.Screen name="buddy" />
+      <Tabs.Screen name="tutor" />
       <Tabs.Screen name="chats" />
       <Tabs.Screen name="profile" />
     </Tabs>
