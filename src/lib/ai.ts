@@ -131,3 +131,66 @@ Spread topics across the weeks and keep the workload realistic.`;
   const parsed = JSON.parse(jsonMatch[0]) as StudyPlan;
   return parsed;
 }
+
+// ---------------------------------------------------------------------------
+// Text-based generation — for uploaded notes / PDFs
+// ---------------------------------------------------------------------------
+
+export async function generateQuizFromText(
+  text: string,
+  count: number,
+): Promise<QuizQuestion[]> {
+  const systemPrompt =
+    'You are an expert educator. Generate study quizzes for university students. ' +
+    'Return ONLY valid JSON — no markdown, no explanation. ' +
+    'Format: {"questions": [{"question": "...", "options": ["A", "B", "C", "D"], "correctIndex": 0, "explanation": "..."}]}';
+
+  const userPrompt = `Based on the following notes, generate ${count} multiple-choice questions.
+Each question must have exactly 4 options, one correct answer, and a brief explanation.
+Make the questions appropriate for a university-level student.
+
+NOTES:
+${text.slice(0, 8000)}`;
+
+  const raw = await callClaude(systemPrompt, userPrompt);
+  const jsonMatch = raw.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) throw new Error('Could not parse quiz response');
+
+  const parsed = JSON.parse(jsonMatch[0]) as { questions: QuizQuestion[] };
+  return parsed.questions;
+}
+
+export async function generateFlashcardsFromText(
+  text: string,
+  count: number,
+): Promise<Flashcard[]> {
+  const systemPrompt =
+    'You are an expert educator. Generate study flashcards for university students. ' +
+    'Return ONLY valid JSON — no markdown, no explanation. ' +
+    'Format: {"cards": [{"front": "...", "back": "...", "hint": "..."}]}';
+
+  const userPrompt = `Based on the following notes, generate ${count} flashcards.
+Each card has a "front" (concept/question) and a "back" (answer/explanation).
+Include a short "hint" for cards that need one.
+Make the cards useful for self-quizzing before exams.
+
+NOTES:
+${text.slice(0, 8000)}`;
+
+  const raw = await callClaude(systemPrompt, userPrompt);
+  const jsonMatch = raw.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) throw new Error('Could not parse flashcard response');
+
+  const parsed = JSON.parse(jsonMatch[0]) as { cards: Flashcard[] };
+  return parsed.cards;
+}
+
+export async function summarizeNotes(text: string): Promise<string> {
+  const systemPrompt =
+    'You are a study assistant. Summarize the following notes concisely for a university student. ' +
+    'Focus on key concepts, definitions, and important facts. Return plain text.';
+
+  const userPrompt = `Summarize these notes:\n\n${text.slice(0, 8000)}`;
+
+  return callClaude(systemPrompt, userPrompt);
+}
